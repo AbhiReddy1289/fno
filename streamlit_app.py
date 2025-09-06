@@ -3,94 +3,60 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
-import time
+from streamlit_autorefresh import st_autorefresh  # pip install streamlit-autorefresh
+
+st.set_page_config(page_title="F&O Simulator", layout="wide")
+
+# --- Autorefresh every 1 second ---
+st_autorefresh(interval=1000, key="datarefresh")
 
 # --- Initialize session state ---
 if "balance" not in st.session_state:
-    st.session_state.balance = 1_00_00_000  # 1 Cr
+    st.session_state.balance = 100_000_000  # 1 Cr default
 if "portfolio" not in st.session_state:
-    st.session_state.portfolio = pd.DataFrame(columns=["Stock", "Type", "Qty", "Price", "Total"])
+    st.session_state.portfolio = {}  # {"Stock": [{"type":"option/future","strike":..,"qty":..,"price":..}]}
 if "price_data" not in st.session_state:
-    st.session_state.price_data = {}
+    st.session_state.price_data = {}  # {"Stock": DataFrame}
 
-# --- Companies & F&O types ---
-companies = ["RELIANCE", "TCS", "INFY", "HDFCBANK"]
-types_dict = {
-    "RELIANCE": ["Option", "Future"],
-    "TCS": ["Option", "Future"],
-    "INFY": ["Option", "Future"],
-    "HDFCBANK": ["Option", "Future"]
-}
+# --- Define available companies ---
+companies = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
 
-# --- Select Companies ---
-selected_stocks = st.multiselect("Select Companies", companies)
+# --- Company selection ---
+selected_stocks = st.multiselect("Select companies to simulate", companies)
 
-# --- Initialize price data for selected stocks ---
+# --- Initialize price data ---
 for stock in selected_stocks:
     if stock not in st.session_state.price_data:
-        # generate 7 days of hourly dummy prices
-        hours = 7 * 24
-        base_price = np.random.randint(1000, 5000)
-        times = [datetime.now() - timedelta(hours=i) for i in reversed(range(hours))]
-        prices = base_price + np.cumsum(np.random.randn(hours)*5)
-        st.session_state.price_data[stock] = pd.DataFrame({"Datetime": times, "Price": prices})
+        base_time = datetime.now() - timedelta(hours=168)
+        times = [base_time + timedelta(hours=i) for i in range(168)]
+        prices = np.random.rand(168) * 1000 + 1000
+        st.session_state.price_data[stock] = pd.DataFrame({
+            "Datetime": times,
+            "Price": prices
+        })
 
-# --- Buy section ---
-st.sidebar.subheader("Buy Stocks / F&O")
-buy_stock = st.sidebar.selectbox("Select Stock", selected_stocks)
-if buy_stock:
-    buy_type = st.sidebar.selectbox("Select Type", types_dict[buy_stock])
-    buy_qty = st.sidebar.number_input("Quantity", min_value=1, value=1)
-    buy_price = st.sidebar.number_input("Price per unit", min_value=1, value=int(st.session_state.price_data[buy_stock]["Price"].iloc[-1]))
+# --- Simulate live prices ---
+for stock in selected_stocks:
+    df = st.session_state.price_data[stock]
+    last_price = df["Price"].iloc[-1]
+    new_price = last_price + np.random.randn()*5
+    new_time = datetime.now()
+    st.session_state.price_data[stock] = pd.concat([
+        df,
+        pd.DataFrame({"Datetime": [new_time], "Price": [new_price]})
+    ], ignore_index=True)
+    if len(st.session_state.price_data[stock]) > 168:
+        st.session_state.price_data[stock] = st.session_state.price_data[stock].iloc[1:]
 
-    if st.sidebar.button("Buy"):
-        total_cost = buy_qty * buy_price
-        if total_cost > st.session_state.balance:
-            st.sidebar.error("Insufficient balance!")
-        else:
-            st.session_state.balance -= total_cost
-            new_entry = pd.DataFrame({
-                "Stock": [buy_stock],
-                "Type": [buy_type],
-                "Qty": [buy_qty],
-                "Price": [buy_price],
-                "Total": [total_cost]
-            })
-            st.session_state.portfolio = pd.concat([st.session_state.portfolio, new_entry], ignore_index=True)
-            st.sidebar.success(f"Bought {buy_qty} {buy_stock} ({buy_type})")
-
-# --- Portfolio display ---
-st.subheader("Portfolio")
-st.write(f"Balance: ₹{st.session_state.balance:,.0f}")
-st.dataframe(st.session_state.portfolio)
-
-# --- Function to simulate live price movement ---
-def simulate_live_prices():
-    for stock in selected_stocks:
-        if stock in st.session_state.price_data:
-            last_price = st.session_state.price_data[stock]['Price'].iloc[-1]
-            new_price = last_price + np.random.randn()*5
-            new_time = datetime.now()
-            st.session_state.price_data[stock] = pd.concat([
-                st.session_state.price_data[stock],
-                pd.DataFrame({"Datetime": [new_time], "Price": [new_price]})
-            ], ignore_index=True)
-            # keep only last 7 days of hourly data (~168 points)
-            if len(st.session_state.price_data[stock]) > 168:
-                st.session_state.price_data[stock] = st.session_state.price_data[stock].iloc[1:]
-
-# --- Live Chart ---
-chart_placeholder = st.empty()
-
-while True:
-    simulate_live_prices()
-    
-    combined_df = pd.DataFrame()
-    for stock, df in st.session_state.price_data.items():
+# --- Display live graph ---
+combined_df = pd.DataFrame()
+for stock, df in st.session_state.price_data.items():
+    if not df.empty:
         temp_df = df.copy()
         temp_df["Stock"] = stock
         combined_df = pd.concat([combined_df, temp_df], ignore_index=True)
-    
+
+if not combined_df.empty:
     fig = px.line(
         combined_df,
         x="Datetime",
@@ -99,6 +65,54 @@ while True:
         title="Simulated Stock & F&O Prices"
     )
     fig.update_xaxes(rangeslider_visible=True)
-    chart_placeholder.plotly_chart(fig, use_container_width=True)
-    
-    time.sleep(1)
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.info("Select at least one company to see the live graph.")
+
+# --- Portfolio management ---
+st.subheader(f"Balance: ₹{st.session_state.balance:,.2f}")
+
+for stock in selected_stocks:
+    st.markdown(f"### {stock}")
+    option_type = st.selectbox(f"Choose Type for {stock}", ["Stock", "Option", "Future"], key=f"type_{stock}")
+
+    buy_qty = st.number_input(f"Buy quantity for {stock}", min_value=0, step=1, key=f"qty_{stock}")
+    buy_price = st.number_input(f"Enter price per unit for {stock}", min_value=0.0, step=0.01, key=f"price_{stock}")
+
+    if st.button(f"Buy {stock}", key=f"buy_{stock}"):
+        cost = buy_qty * buy_price
+        if cost > st.session_state.balance:
+            st.warning("Not enough balance!")
+        elif buy_qty > 0:
+            st.session_state.balance -= cost
+            if stock not in st.session_state.portfolio:
+                st.session_state.portfolio[stock] = []
+            st.session_state.portfolio[stock].append({
+                "type": option_type,
+                "qty": buy_qty,
+                "price": buy_price,
+                "time": datetime.now()
+            })
+            st.success(f"Bought {buy_qty} of {stock} at ₹{buy_price} each.")
+
+# --- Show Portfolio with Sell Option ---
+st.subheader("Portfolio")
+if st.session_state.portfolio:
+    for stock, entries in st.session_state.portfolio.items():
+        st.markdown(f"**{stock}**")
+        to_remove = []
+        for idx, entry in enumerate(entries):
+            current_price = st.session_state.price_data[stock]["Price"].iloc[-1] if stock in st.session_state.price_data else entry["price"]
+            pnl = (current_price - entry["price"]) * entry["qty"]
+            st.write(f"{idx+1}. {entry['type']} | Qty: {entry['qty']} | Bought at: ₹{entry['price']} | Current P&L: ₹{pnl:,.2f}")
+            
+            if st.button(f"Sell {stock} position {idx+1}", key=f"sell_{stock}_{idx}"):
+                # Sell stock
+                st.session_state.balance += current_price * entry["qty"]
+                to_remove.append(idx)
+                st.success(f"Sold {entry['qty']} of {stock} at ₹{current_price:.2f} each, P&L: ₹{pnl:,.2f}")
+        # Remove sold entries
+        for idx in sorted(to_remove, reverse=True):
+            entries.pop(idx)
+else:
+    st.info("No stocks bought yet.")
