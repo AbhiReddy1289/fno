@@ -7,7 +7,7 @@ import plotly.express as px
 # Initialize session state safely  
 # -----------------------------  
 if 'balance' not in st.session_state:  
-    st.session_state.balance = 1_00_000_000  # 1 Crore as numeric  
+    st.session_state.balance = 1_00_000_000  # 1 Crore (numeric)  
 
 if 'portfolio' not in st.session_state:  
     st.session_state.portfolio = pd.DataFrame(  
@@ -73,4 +73,12 @@ if selected_companies:
             if amount > st.session_state.balance:  
                 st.error("Insufficient balance!")  
             elif price <= 0 or amount <= 0:  
-                st.error("Price and amount must be greater than 0
+                st.error("Price and amount must be greater than 0")  
+            else:  
+                units = amount / price  
+                # Deduct from balance  
+                st.session_state.balance -= amount  
+
+                # Initialize price simulation for this company if not already  
+                if buy_company not in st.session_state.prices:  
+                    st.session_state.prices[buy_company
