@@ -2,16 +2,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from datetime import datetime, timedelta
 
 # -----------------------------
 # Initialize session state safely
 # -----------------------------
 if 'balance' not in st.session_state:
-    st.session_state.balance = 100_000_000  # 1 Crore (as integer)
+    st.session_state.balance = 100_000_000  # 1 Crore (numeric)
 
 if 'portfolio' not in st.session_state:
-    st.session_state.portfolio = pd.DataFrame(columns=['Company', 'Type', 'Invested Amount', 'Units', 'Current Value'])
+    st.session_state.portfolio = pd.DataFrame(
+        columns=['Company', 'Type', 'Invested Amount', 'Units', 'Current Value']
+    )
 
 if 'prices' not in st.session_state:
     st.session_state.prices = {}
@@ -37,15 +38,32 @@ st.subheader("Buy F&O")
 # Ensure we only render buy fields when a company is selected
 if selected_companies:
     with st.form("buy_form"):
-        buy_company = st.selectbox("Select Company", selected_companies)  # choose within the selected
+        buy_company = st.selectbox("Select Company", selected_companies)
         fo_type = st.selectbox("Select F&O Type", ["Futures", "Options"])
-        price = st.number_input("Enter Price per Unit", min_value=0.01, format="%.2f")
-        # Guard against None balance
-        current_balance = max(st.session_state.balance, 0)
-        amount = st.number_input("Enter Investment Amount", min_value=0.01, max_value=current_balance, format="%.2f")
+
+        price = st.number_input(
+            "Enter Price per Unit",
+            min_value=0.01,
+            value=0.01,
+            format="%.2f",
+            step=0.01
+        )
+
+        # Guard against None balance and ensure it's numeric
+        current_balance = float(st.session_state.balance)
+        amount = st.number_input(
+            "Enter Investment Amount",
+            min_value=0.01,
+            max_value=current_balance,
+            value=0.01,
+            format="%.2f",
+            step=0.01
+        )
+
         submitted = st.form_submit_button("Buy")
 
         if submitted:
+            # Validate inputs
             if amount > st.session_state.balance:
                 st.error("Insufficient balance!")
             elif price <= 0 or amount <= 0:
@@ -58,15 +76,16 @@ if selected_companies:
                 if buy_company not in st.session_state.prices:
                     st.session_state.prices[buy_company] = price
                 # Add to portfolio
+                new_row = {
+                    'Company': buy_company,
+                    'Type': fo_type,
+                    'Invested Amount': amount,
+                    'Units': units,
+                    'Current Value': amount
+                }
                 st.session_state.portfolio = pd.concat([
                     st.session_state.portfolio,
-                    pd.DataFrame([{
-                        'Company': buy_company,
-                        'Type': fo_type,
-                        'Invested Amount': amount,
-                        'Units': units,
-                        'Current Value': amount
-                    }])
+                    pd.DataFrame([new_row])
                 ], ignore_index=True)
                 st.success(f"Bought {units:.2f} units of {buy_company} {fo_type} for ₹{amount:,.2f}")
 else:
@@ -76,7 +95,7 @@ else:
 # Show Balance
 # -----------------------------
 st.subheader("Available Balance")
-st.write(f"₹{st.session_state.balance:,.2f}")
+st.write(f"₹{float(st.session_state.balance):,.2f}")
 
 # -----------------------------
 # Price Simulation
