@@ -1,99 +1,94 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-from datetime import datetime
+import numpy as np
+import plotly.graph_objs as go
+import time
+from datetime import datetime, timedelta
 
-# Demo Data for Companies and Trade Details
-COMPANIES = [
-    {"name": "Alpha Corp", "symbol": "ALPH"},
-    {"name": "Beta Ltd", "symbol": "BETA"},
-    {"name": "Gamma Inc", "symbol": "GAMM"},
-]
-
-TRADING_TYPES = ["Option", "Future"]
-
-# Example trade details per type
-TRADE_DETAILS = {
-    "Option": ["Call Option", "Put Option"],
-    "Future": ["Quarterly Future", "Monthly Future"]
-}
-
-# Session state setup (persistence across Streamlit runs)
+# Session State Setup
 if "balance" not in st.session_state:
-    st.session_state.balance = 1_00_00_000  # 1 crore in INR (1,00,00,000)
+    st.session_state.balance = 1_00_00_000
 if "trades" not in st.session_state:
     st.session_state.trades = []
+if "market_price" not in st.session_state:
+    st.session_state.market_price = 1000  # Example starting price
 
-st.title("Trading Simulation Interface")
+st.title("F&O Trading Simulator – Real-Time P&L Playground")
 
-# 1. Company Selection (Checklist-style Dropdown)
-company_options = [f"{c['name']} ({c['symbol']})" for c in COMPANIES]
-company_choice = st.selectbox("Select a Company", ["-- Select Company --"] + company_options)
-selected_company = None
-if company_choice != "-- Select Company --":
-    selected_company = next(c for c in COMPANIES if company_choice.startswith(c["name"]))
+# 1. Simulated Market Price Slider (real-time or replay)
+market_price = st.slider("Simulated Spot Price", 500, 2000, int(st.session_state.market_price), step=1)
+st.session_state.market_price = market_price
 
-# 2. Trading Type (shown after company selection)
-selected_type = None
-if selected_company:
-    selected_type = st.selectbox("Select Trading Type", TRADING_TYPES)
+# 2. F&O Trade Entry
+with st.form("trade_entry"):
+    t_type = st.selectbox("Product", ["Future", "Call Option", "Put Option"])
+    buy_sell = st.selectbox("Side", ["Buy", "Sell"])
+    qty = st.number_input("Quantity", 1, 1000, 1)
+    strike = st.number_input("Strike Price", 500, 2000, market_price, step=1)
+    premium = st.number_input("Option Premium (0 for Future)", 0, 10000, 100)
+    expiry = st.date_input("Expiry Date", value=datetime.today() + timedelta(days=30))
+    submit = st.form_submit_button("Add Trade")
+    
+    if submit:
+        trade = {
+            "Type": t_type, "Side": buy_sell, "Qty": qty, "Strike": strike,
+            "Premium": premium if t_type != "Future" else 0,
+            "EntryPrice": st.session_state.market_price,
+            "Expiry": expiry,
+            "Open": True,
+            "Timestamp": datetime.now()
+        }
+        st.session_state.trades.append(trade)
+        st.success("Trade added.")
 
-# 3. Trading Detail (shown after trading type selection)
-selected_detail = None
-if selected_type:
-    trade_detail_options = TRADE_DETAILS[selected_type]
-    selected_detail = st.selectbox("Select Trade Detail", trade_detail_options)
+# Close (exit/unwind) trades button
+if st.button("Square Off All"):
+    for t in st.session_state.trades:
+        t["Open"] = False
 
-# 4. Price Input & Buy Action (shown after trade detail selection)
-execute_trade = False
-price = None
-if selected_detail:
-    st.write(f"Current Balance: ₹ {st.session_state.balance:,.2f}")
-    price = st.number_input("Enter Trade Price (INR)", min_value=1, step=1, value=10000)
-    if st.button("Buy"):
-        # Validation: Sufficient Funds
-        if price > st.session_state.balance:
-            st.error("Insufficient funds.")
-        else:
-            trade_record = {
-                "Company": selected_company['name'],
-                "Symbol": selected_company['symbol'],
-                "Type": selected_type,
-                "Detail": selected_detail,
-                "Price": price,
-                "Timestamp": datetime.now()
-            }
-            st.session_state.balance -= price
-            st.session_state.trades.append(trade_record)
-            st.success(f"Trade executed for {selected_company['name']} ({selected_type} - {selected_detail}) at ₹ {price:,.2f}.")
+# 3. Live Trade Table & P&L
+def calc_pnl(trade, spot):
+    if trade["Type"] == "Future":
+        multiplier = 1 if trade["Side"] == "Buy" else -1
+        return (spot - trade["EntryPrice"]) * trade["Qty"] * multiplier
+    else:
+        # Option
+        is_call = trade["Type"] == "Call Option"
+        side = 1 if trade["Side"] == "Buy" else -1
+        # Payoff for call: max(spot-strike, 0) - premium  (long), or -payoff (short)
+        intrinsic = max(spot - trade["Strike"], 0) if is_call else max(trade["Strike"] - spot, 0)
+        payoff = (intrinsic - trade["Premium"]) * side * trade["Qty"]
+        return payoff
 
-# 5. Trade Log Table
-trades_df = pd.DataFrame(st.session_state.trades)
-if not trades_df.empty:
-    st.markdown("#### Trade Log")
-    show_df = trades_df.copy()
-    show_df["Timestamp"] = show_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
-    st.dataframe(show_df)
+# MTM P&L Table
+trade_df = pd.DataFrame(st.session_state.trades)
+if not trade_df.empty:
+    trade_df["MTM_PnL"] = trade_df.apply(lambda x: calc_pnl(x, st.session_state.market_price), axis=1)
+    st.markdown("### Current Trades and MTM Profit/Loss")
+    st.dataframe(trade_df)
 
-# 6. Dynamic Balance/Trade Graph (only after first trade)
-if not trades_df.empty:
-    # Plotting: Balance after each trade
-    balances = [1_00_00_000]
-    for price in trades_df["Price"]:
-        balances.append(balances[-1] - price)
-    balances = balances[1:]  # Exclude initial
+# 4. Real-Time Moving Graph (simulate passage of time or price)
+st.markdown('### Live P&L Graph (Moves with Price or Time)')
+placeholder = st.empty()
+pnl_history = []
 
+# Simulate a "live" moving graph over spot price range
+spot_prices = np.linspace(st.session_state.market_price - 100, st.session_state.market_price + 100, 100)
+for spot in spot_prices:
+    pnl = sum([calc_pnl(trade, spot) for trade in st.session_state.trades if trade["Open"]])
+    pnl_history.append({'Spot': spot, 'PnL': pnl})
+
+_pnl_df = pd.DataFrame(pnl_history)
+with placeholder.container():
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=trades_df["Timestamp"], 
-        y=balances, 
-        mode="lines+markers", 
-        name="Balance"
-    ))
-    fig.update_layout(
-        title="Account Balance Over Trades",
-        xaxis_title="Trade Timestamp",
-        yaxis_title="Balance (INR)",
-        showlegend=True,
-    )
+    fig.add_trace(go.Scatter(x=_pnl_df["Spot"], y=_pnl_df["PnL"], mode="lines+markers", name="Running P&L"))
+    fig.update_layout(title="Potential P&L vs Spot Price (Dynamic Live View)", xaxis_title="Spot Price", yaxis_title="P&L")
     st.plotly_chart(fig, use_container_width=True)
+
+# 5. Real-Time Progress: Show recent P&L change with price updates
+if not trade_df.empty:
+    st.metric("Running P&L at Current Price", int(_pnl_df[_pnl_df["Spot"] == st.session_state.market_price]["PnL"].values))
+
+st.info("Try any combination: buy/sell, different strikes, expiries, and see real-time change in loss/gain as market price moves. Use slider to simulate the market, or add/close trades to observe instantaneous MTM movement, like real F&O trading.")
+
+
