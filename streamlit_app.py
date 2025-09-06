@@ -1,118 +1,80 @@
 import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.express as px
 from datetime import datetime, timedelta
-from streamlit_autorefresh import st_autorefresh  # pip install streamlit-autorefresh
+import yfinance as yf
+import time
 
-st.set_page_config(page_title="F&O Simulator", layout="wide")
+# ----------------------
+# Page Config
+# ----------------------
+st.set_page_config(page_title="F&O Live Simulator", layout="wide")
 
-# --- Autorefresh every 1 second ---
-st_autorefresh(interval=1000, key="datarefresh")
+# ----------------------
+# Auto-refresh every 2 seconds
+# ----------------------
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = time.time()
 
-# --- Initialize session state ---
-if "balance" not in st.session_state:
-    st.session_state.balance = 100_000_000  # 1 Cr default
-if "portfolio" not in st.session_state:
-    st.session_state.portfolio = {}  # {"Stock": [{"type":"option/future","strike":..,"qty":..,"price":..}]}
-if "price_data" not in st.session_state:
-    st.session_state.price_data = {}  # {"Stock": DataFrame}
+if time.time() - st.session_state.last_refresh > 2:
+    st.session_state.last_refresh = time.time()
+    st.experimental_rerun()
 
-# --- Define available companies ---
-companies = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
+# ----------------------
+# Sidebar Settings
+# ----------------------
+st.sidebar.header("Simulator Settings")
+symbol = st.sidebar.text_input("Stock Symbol", value="TCS.NS")
+days = st.sidebar.slider("Number of Days to Simulate", min_value=5, max_value=30, value=10)
+volatility_futures = st.sidebar.slider("Futures Volatility (%)", min_value=0.1, max_value=5.0, value=1.0)
+volatility_options = st.sidebar.slider("Options Volatility (%)", min_value=0.1, max_value=10.0, value=2.0)
 
-# --- Company selection ---
-selected_stocks = st.multiselect("Select companies to simulate", companies)
+# ----------------------
+# Fetch Historical Data
+# ----------------------
+@st.cache_data
+def get_stock_data(symbol, days):
+    end = datetime.today()
+    start = end - timedelta(days=days*3)  # buffer for weekends
+    data = yf.download(symbol, start=start, end=end, progress=False)
+    if data.empty:
+        return pd.DataFrame()
+    data = data.reset_index()[["Date", "Close"]].tail(days)
+    data.rename(columns={"Close": "Stock Price"}, inplace=True)
+    return data
 
-# --- Initialize price data ---
-for stock in selected_stocks:
-    if stock not in st.session_state.price_data:
-        base_time = datetime.now() - timedelta(hours=168)
-        times = [base_time + timedelta(hours=i) for i in range(168)]
-        prices = np.random.rand(168) * 1000 + 1000
-        st.session_state.price_data[stock] = pd.DataFrame({
-            "Datetime": times,
-            "Price": prices
-        })
+stock_df = get_stock_data(symbol, days)
 
-# --- Simulate live prices ---
-for stock in selected_stocks:
-    df = st.session_state.price_data[stock]
-    last_price = df["Price"].iloc[-1]
-    new_price = last_price + np.random.randn()*5
-    new_time = datetime.now()
-    st.session_state.price_data[stock] = pd.concat([
-        df,
-        pd.DataFrame({"Datetime": [new_time], "Price": [new_price]})
-    ], ignore_index=True)
-    if len(st.session_state.price_data[stock]) > 168:
-        st.session_state.price_data[stock] = st.session_state.price_data[stock].iloc[1:]
+# ----------------------
+# Simulate F&O Prices
+# ----------------------
+def simulate_fo(stock_df, vol_f, vol_o):
+    fo_df = stock_df.copy()
+    np.random.seed(int(time.time()))
+    fo_df["Futures"] = fo_df["Stock Price"] * (1 + np.random.normal(0, vol_f/100, len(fo_df)))
+    fo_df["Options"] = fo_df["Stock Price"] * (1 + np.random.normal(0, vol_o/100, len(fo_df)))
+    return fo_df
 
-# --- Display live graph ---
-combined_df = pd.DataFrame()
-for stock, df in st.session_state.price_data.items():
-    if not df.empty:
-        temp_df = df.copy()
-        temp_df["Stock"] = stock
-        combined_df = pd.concat([combined_df, temp_df], ignore_index=True)
+fo_df = simulate_fo(stock_df, volatility_futures, volatility_options)
 
-if not combined_df.empty:
+# ----------------------
+# Plot Chart
+# ----------------------
+if not fo_df.empty:
     fig = px.line(
-        combined_df,
-        x="Datetime",
-        y="Price",
-        color="Stock",
-        title="Simulated Stock & F&O Prices"
+        fo_df,
+        x="Date",
+        y=["Stock Price", "Futures", "Options"],
+        title=f"{symbol} - Live F&O Simulation",
+        labels={"value": "Price", "variable": "Type"},
+        template="plotly_dark"
     )
-    fig.update_xaxes(rangeslider_visible=True)
     st.plotly_chart(fig, use_container_width=True)
 else:
-    st.info("Select at least one company to see the live graph.")
+    st.warning("No data found for this symbol or time range.")
 
-# --- Portfolio management ---
-st.subheader(f"Balance: ₹{st.session_state.balance:,.2f}")
-
-for stock in selected_stocks:
-    st.markdown(f"### {stock}")
-    option_type = st.selectbox(f"Choose Type for {stock}", ["Stock", "Option", "Future"], key=f"type_{stock}")
-
-    buy_qty = st.number_input(f"Buy quantity for {stock}", min_value=0, step=1, key=f"qty_{stock}")
-    buy_price = st.number_input(f"Enter price per unit for {stock}", min_value=0.0, step=0.01, key=f"price_{stock}")
-
-    if st.button(f"Buy {stock}", key=f"buy_{stock}"):
-        cost = buy_qty * buy_price
-        if cost > st.session_state.balance:
-            st.warning("Not enough balance!")
-        elif buy_qty > 0:
-            st.session_state.balance -= cost
-            if stock not in st.session_state.portfolio:
-                st.session_state.portfolio[stock] = []
-            st.session_state.portfolio[stock].append({
-                "type": option_type,
-                "qty": buy_qty,
-                "price": buy_price,
-                "time": datetime.now()
-            })
-            st.success(f"Bought {buy_qty} of {stock} at ₹{buy_price} each.")
-
-# --- Show Portfolio with Sell Option ---
-st.subheader("Portfolio")
-if st.session_state.portfolio:
-    for stock, entries in st.session_state.portfolio.items():
-        st.markdown(f"**{stock}**")
-        to_remove = []
-        for idx, entry in enumerate(entries):
-            current_price = st.session_state.price_data[stock]["Price"].iloc[-1] if stock in st.session_state.price_data else entry["price"]
-            pnl = (current_price - entry["price"]) * entry["qty"]
-            st.write(f"{idx+1}. {entry['type']} | Qty: {entry['qty']} | Bought at: ₹{entry['price']} | Current P&L: ₹{pnl:,.2f}")
-            
-            if st.button(f"Sell {stock} position {idx+1}", key=f"sell_{stock}_{idx}"):
-                # Sell stock
-                st.session_state.balance += current_price * entry["qty"]
-                to_remove.append(idx)
-                st.success(f"Sold {entry['qty']} of {stock} at ₹{current_price:.2f} each, P&L: ₹{pnl:,.2f}")
-        # Remove sold entries
-        for idx in sorted(to_remove, reverse=True):
-            entries.pop(idx)
-else:
-    st.info("No stocks bought yet.")
+# ----------------------
+# Footer
+# ----------------------
+st.caption("Live F&O Prices are simulated for demonstration. Not financial advice.")
