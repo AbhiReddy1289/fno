@@ -81,4 +81,10 @@ if selected_companies:
 
                 # Initialize price simulation for this company if not already  
                 if buy_company not in st.session_state.prices:  
-                    st.session_state.prices[buy_company
+                    st.session_state.prices[buy_company] = price  
+
+                # Add to portfolio  
+                new_row = {  
+                    'Company': buy_company,  
+                    'Type': fo_type,  
+                    'Invested Amount
