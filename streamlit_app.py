@@ -18,7 +18,7 @@ if 'prices' not in st.session_state:
     st.session_state.prices = {}  # {company: price}  
 
 if 'price_history' not in st.session_state:  
-    st.session_state.price_history = {}  # {company: [price1, price2, ...]}  
+    st.session_state.price_history = {}  # {company: [prices]}  
 
 # -----------------------------  
 # Company list  
@@ -87,12 +87,8 @@ if selected_companies:
                     st.session_state.prices[buy_company] = price  
                     st.session_state.price_history[buy_company] = [price]  
                 else:  
-                    # record the initial price if not present  
-                    if not st.session_state.price_history.get(buy_company):  
-                        st.session_state.price_history[buy_company] = [st.session_state.prices[buy_company]]  
-
-                # Add to price history for the new purchase price  
-                st.session_state.price_history[buy_company].append(price)  
+                    # Append current price to history  
+                    st.session_state.price_history[buy_company].append(price)  
 
                 # Add to portfolio  
                 new_row = {  
@@ -104,4 +100,25 @@ if selected_companies:
                 }  
                 st.session_state.portfolio = pd.concat([  
                     st.session_state.portfolio,  
-                    pd.DataFrame([new
+                    pd.DataFrame([new_row])  
+                ], ignore_index=True)  
+
+                st.success(f"Bought {units:.4f} units of {buy_company} ({fo_type}) for ₹{amount:,.2f}")  
+else:  
+    st.info("Select one or more companies to enable the Buy form.")  
+
+# -----------------------------  
+# Display Balance  
+# -----------------------------  
+st.sidebar.subheader("Account Summary")  
+st.sidebar.write(f"Balance: ₹{float(st.session_state.balance):,.2f}")  
+
+# -----------------------------  
+# Price Update & Visualization  
+# -----------------------------  
+st.subheader("Prices & Portfolio")  
+
+# Update Prices button (simulate random walk)  
+update_clicked = st.button("Update Prices")  
+
+# Initialize prices for all
