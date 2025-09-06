@@ -25,7 +25,13 @@ if error_msg is not None:
     st.error(error_msg)
     st.stop()
 
-hourly_prices = data['Close'].dropna().tolist()
+# Fix pandas DataFrame 'Close' column type safely
+close_col = data['Close']
+if isinstance(close_col, pd.DataFrame):
+    close_series = close_col.squeeze()
+else:
+    close_series = close_col
+hourly_prices = close_series.dropna().tolist()
 
 # Initialize session state after data validation
 if "hourly_prices" not in st.session_state:
