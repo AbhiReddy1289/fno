@@ -1,124 +1,99 @@
-import streamlit as st  
-import pandas as pd  
-import numpy as np  
-import plotly.express as px  
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+from datetime import datetime
 
-# -----------------------------  
-# Initialize session state safely  
-# -----------------------------  
-if 'balance' not in st.session_state:  
-    st.session_state.balance = 1_00_000_000  # 1 Crore (numeric)  
+# Demo Data for Companies and Trade Details
+COMPANIES = [
+    {"name": "Alpha Corp", "symbol": "ALPH"},
+    {"name": "Beta Ltd", "symbol": "BETA"},
+    {"name": "Gamma Inc", "symbol": "GAMM"},
+]
 
-if 'portfolio' not in st.session_state:  
-    st.session_state.portfolio = pd.DataFrame(  
-        columns=['Company', 'Type', 'Invested Amount', 'Units', 'Current Value']  
-    )  
+TRADING_TYPES = ["Option", "Future"]
 
-if 'prices' not in st.session_state:  
-    st.session_state.prices = {}  # {company: price}  
+# Example trade details per type
+TRADE_DETAILS = {
+    "Option": ["Call Option", "Put Option"],
+    "Future": ["Quarterly Future", "Monthly Future"]
+}
 
-if 'price_history' not in st.session_state:  
-    st.session_state.price_history = {}  # {company: [prices]}  
+# Session state setup (persistence across Streamlit runs)
+if "balance" not in st.session_state:
+    st.session_state.balance = 1_00_00_000  # 1 crore in INR (1,00,00,000)
+if "trades" not in st.session_state:
+    st.session_state.trades = []
 
-# -----------------------------  
-# Company list  
-# -----------------------------  
-companies = ["TCS", "INFY", "RELIANCE", "HDFC", "ICICI", "SBIN", "LT", "WIPRO"]  
+st.title("Trading Simulation Interface")
 
-# Page setup  
-st.set_page_config(page_title="F&O Simulator", layout="wide")  
-st.title("F&O Simulator")  
+# 1. Company Selection (Checklist-style Dropdown)
+company_options = [f"{c['name']} ({c['symbol']})" for c in COMPANIES]
+company_choice = st.selectbox("Select a Company", ["-- Select Company --"] + company_options)
+selected_company = None
+if company_choice != "-- Select Company --":
+    selected_company = next(c for c in COMPANIES if company_choice.startswith(c["name"]))
 
-# -----------------------------  
-# Company Selection (checkbox-style checklist)  
-# -----------------------------  
-st.subheader("Select Companies to Trade")  
-selected_companies = st.multiselect(  
-    "Choose one or more companies",  
-    options=companies,  
-    default=[]  
-)  
+# 2. Trading Type (shown after company selection)
+selected_type = None
+if selected_company:
+    selected_type = st.selectbox("Select Trading Type", TRADING_TYPES)
 
-# -----------------------------  
-# Buy Section  
-# -----------------------------  
-st.subheader("Buy F&O")  
+# 3. Trading Detail (shown after trading type selection)
+selected_detail = None
+if selected_type:
+    trade_detail_options = TRADE_DETAILS[selected_type]
+    selected_detail = st.selectbox("Select Trade Detail", trade_detail_options)
 
-# Buy form should appear only after at least one company is selected  
-if selected_companies:  
-    with st.form("buy_form"):  
-        buy_company = st.selectbox("Select Company", options=selected_companies)  
+# 4. Price Input & Buy Action (shown after trade detail selection)
+execute_trade = False
+price = None
+if selected_detail:
+    st.write(f"Current Balance: ₹ {st.session_state.balance:,.2f}")
+    price = st.number_input("Enter Trade Price (INR)", min_value=1, step=1, value=10000)
+    if st.button("Buy"):
+        # Validation: Sufficient Funds
+        if price > st.session_state.balance:
+            st.error("Insufficient funds.")
+        else:
+            trade_record = {
+                "Company": selected_company['name'],
+                "Symbol": selected_company['symbol'],
+                "Type": selected_type,
+                "Detail": selected_detail,
+                "Price": price,
+                "Timestamp": datetime.now()
+            }
+            st.session_state.balance -= price
+            st.session_state.trades.append(trade_record)
+            st.success(f"Trade executed for {selected_company['name']} ({selected_type} - {selected_detail}) at ₹ {price:,.2f}.")
 
-        fo_type = st.selectbox("Select F&O Type", ["Futures", "Options"])  
+# 5. Trade Log Table
+trades_df = pd.DataFrame(st.session_state.trades)
+if not trades_df.empty:
+    st.markdown("#### Trade Log")
+    show_df = trades_df.copy()
+    show_df["Timestamp"] = show_df["Timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    st.dataframe(show_df)
 
-        price = st.number_input(  
-            "Enter Price per Unit",  
-            min_value=0.01,  
-            value=0.01,  
-            format="%.2f",  
-            step=0.01  
-        )  
+# 6. Dynamic Balance/Trade Graph (only after first trade)
+if not trades_df.empty:
+    # Plotting: Balance after each trade
+    balances = [1_00_00_000]
+    for price in trades_df["Price"]:
+        balances.append(balances[-1] - price)
+    balances = balances[1:]  # Exclude initial
 
-        current_balance = float(st.session_state.balance)  
-        amount = st.number_input(  
-            "Enter Investment Amount",  
-            min_value=0.01,  
-            max_value=current_balance,  
-            value=0.01,  
-            format="%.2f",  
-            step=0.01  
-        )  
-
-        submitted = st.form_submit_button("Buy")  
-
-        if submitted:  
-            # Validation  
-            if amount > st.session_state.balance:  
-                st.error("Insufficient balance!")  
-            elif price <= 0 or amount <= 0:  
-                st.error("Price and amount must be greater than 0")  
-            else:  
-                units = amount / price  
-                # Deduct from balance  
-                st.session_state.balance -= amount  
-
-                # Initialize price simulation for this company if not already  
-                if buy_company not in st.session_state.prices:  
-                    st.session_state.prices[buy_company] = price  
-                    st.session_state.price_history[buy_company] = [price]  
-                else:  
-                    # Append current price to history  
-                    st.session_state.price_history[buy_company].append(price)  
-
-                # Add to portfolio  
-                new_row = {  
-                    'Company': buy_company,  
-                    'Type': fo_type,  
-                    'Invested Amount': amount,  
-                    'Units': units,  
-                    'Current Value': amount  
-                }  
-                st.session_state.portfolio = pd.concat([  
-                    st.session_state.portfolio,  
-                    pd.DataFrame([new_row])  
-                ], ignore_index=True)  
-
-                st.success(f"Bought {units:.4f} units of {buy_company} ({fo_type}) for ₹{amount:,.2f}")  
-else:  
-    st.info("Select one or more companies to enable the Buy form.")  
-
-# -----------------------------  
-# Display Balance  
-# -----------------------------  
-st.sidebar.subheader("Account Summary")  
-st.sidebar.write(f"Balance: ₹{float(st.session_state.balance):,.2f}")  
-
-# -----------------------------  
-# Price Update & Visualization  
-# -----------------------------  
-st.subheader("Prices & Portfolio")  
-
-# Update Prices button (simulate random walk)  
-update_clicked = st.button("Update Prices")  
-
-# Initialize prices for all
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=trades_df["Timestamp"], 
+        y=balances, 
+        mode="lines+markers", 
+        name="Balance"
+    ))
+    fig.update_layout(
+        title="Account Balance Over Trades",
+        xaxis_title="Trade Timestamp",
+        yaxis_title="Balance (INR)",
+        showlegend=True,
+    )
+    st.plotly_chart(fig, use_container_width=True)
