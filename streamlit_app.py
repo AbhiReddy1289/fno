@@ -17,6 +17,9 @@ if 'portfolio' not in st.session_state:
 if 'prices' not in st.session_state:  
     st.session_state.prices = {}  # {company: price}  
 
+if 'price_history' not in st.session_state:  
+    st.session_state.price_history = {}  # {company: [price1, price2, ...]}  
+
 # -----------------------------  
 # Company list  
 # -----------------------------  
@@ -82,6 +85,14 @@ if selected_companies:
                 # Initialize price simulation for this company if not already  
                 if buy_company not in st.session_state.prices:  
                     st.session_state.prices[buy_company] = price  
+                    st.session_state.price_history[buy_company] = [price]  
+                else:  
+                    # record the initial price if not present  
+                    if not st.session_state.price_history.get(buy_company):  
+                        st.session_state.price_history[buy_company] = [st.session_state.prices[buy_company]]  
+
+                # Add to price history for the new purchase price  
+                st.session_state.price_history[buy_company].append(price)  
 
                 # Add to portfolio  
                 new_row = {  
@@ -93,25 +104,4 @@ if selected_companies:
                 }  
                 st.session_state.portfolio = pd.concat([  
                     st.session_state.portfolio,  
-                    pd.DataFrame([new_row])  
-                ], ignore_index=True)  
-
-                st.success(f"Bought {units:.2f} units of {buy_company} ({fo_type}) for ₹{amount:,.2f}")  
-else:  
-    st.info("Select one or more companies to enable the Buy form.")  
-
-# -----------------------------  
-# Display Balance  
-# -----------------------------  
-st.sidebar.subheader("Account Summary")  
-st.sidebar.write(f"Balance: ₹{float(st.session_state.balance):,.2f}")  
-
-# -----------------------------  
-# Price Simulation & Visualization  
-# -----------------------------  
-st.subheader("Prices & Portfolio")  
-
-# Price update controls  
-col1, col2 = st.columns([1, 1])  
-
-with col
+                    pd.DataFrame([new
