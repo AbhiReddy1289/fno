@@ -5,10 +5,10 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # -----------------------------
-# Initialize session state
+# Initialize session state safely
 # -----------------------------
 if 'balance' not in st.session_state:
-    st.session_state.balance = 100_00_000  # 1 Cr
+    st.session_state.balance = 100_000_000  # 1 Crore (as integer)
 
 if 'portfolio' not in st.session_state:
     st.session_state.portfolio = pd.DataFrame(columns=['Company', 'Type', 'Invested Amount', 'Units', 'Current Value'])
@@ -34,14 +34,17 @@ selected_companies = st.multiselect("Select Companies to Trade", options=compani
 # -----------------------------
 st.subheader("Buy F&O")
 
-with st.form("buy_form"):
-    if selected_companies:
-        buy_company = st.selectbox("Select Company", selected_companies)
+# Ensure we only render buy fields when a company is selected
+if selected_companies:
+    with st.form("buy_form"):
+        buy_company = st.selectbox("Select Company", selected_companies)  # choose within the selected
         fo_type = st.selectbox("Select F&O Type", ["Futures", "Options"])
         price = st.number_input("Enter Price per Unit", min_value=0.01, format="%.2f")
-        amount = st.number_input("Enter Investment Amount", min_value=0.01, max_value=st.session_state.balance, format="%.2f")
+        # Guard against None balance
+        current_balance = max(st.session_state.balance, 0)
+        amount = st.number_input("Enter Investment Amount", min_value=0.01, max_value=current_balance, format="%.2f")
         submitted = st.form_submit_button("Buy")
-        
+
         if submitted:
             if amount > st.session_state.balance:
                 st.error("Insufficient balance!")
@@ -66,6 +69,8 @@ with st.form("buy_form"):
                     }])
                 ], ignore_index=True)
                 st.success(f"Bought {units:.2f} units of {buy_company} {fo_type} for ₹{amount:,.2f}")
+else:
+    st.info("Select one or more companies to enable the Buy form.")
 
 # -----------------------------
 # Show Balance
@@ -100,9 +105,11 @@ def update_portfolio(prices):
 # -----------------------------
 st.subheader("Price Chart")
 
+# Add a button to trigger price updates
 if st.button("Update Prices"):
     st.session_state.prices = simulate_prices()
-    
+
+# If there are prices, show a bar chart
 if st.session_state.prices:
     price_df = pd.DataFrame(list(st.session_state.prices.items()), columns=['Company', 'Price'])
     fig = px.bar(price_df, x='Company', y='Price', text='Price', title="Current Prices of Companies")
