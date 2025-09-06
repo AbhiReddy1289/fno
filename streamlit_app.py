@@ -22,6 +22,7 @@ if 'prices' not in st.session_state:
 # -----------------------------  
 companies = ["TCS", "INFY", "RELIANCE", "HDFC", "ICICI", "SBIN", "LT", "WIPRO"]  
 
+# Page setup  
 st.set_page_config(page_title="F&O Simulator", layout="wide")  
 st.title("F&O Simulator")  
 
@@ -55,7 +56,6 @@ if selected_companies:
             step=0.01  
         )  
 
-        # Guard against None balance and ensure numeric  
         current_balance = float(st.session_state.balance)  
         amount = st.number_input(  
             "Enter Investment Amount",  
@@ -87,4 +87,31 @@ if selected_companies:
                 new_row = {  
                     'Company': buy_company,  
                     'Type': fo_type,  
-                    'Invested Amount
+                    'Invested Amount': amount,  
+                    'Units': units,  
+                    'Current Value': amount  
+                }  
+                st.session_state.portfolio = pd.concat([  
+                    st.session_state.portfolio,  
+                    pd.DataFrame([new_row])  
+                ], ignore_index=True)  
+
+                st.success(f"Bought {units:.2f} units of {buy_company} ({fo_type}) for ₹{amount:,.2f}")  
+else:  
+    st.info("Select one or more companies to enable the Buy form.")  
+
+# -----------------------------  
+# Display Balance  
+# -----------------------------  
+st.sidebar.subheader("Account Summary")  
+st.sidebar.write(f"Balance: ₹{float(st.session_state.balance):,.2f}")  
+
+# -----------------------------  
+# Price Simulation & Visualization  
+# -----------------------------  
+st.subheader("Prices & Portfolio")  
+
+# Price update controls  
+col1, col2 = st.columns([1, 1])  
+
+with col
