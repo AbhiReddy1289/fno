@@ -1,80 +1,123 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from datetime import datetime, timedelta
-import yfinance as yf
-import time
 
-# ----------------------
-# Page Config
-# ----------------------
-st.set_page_config(page_title="F&O Live Simulator", layout="wide")
+# -----------------------------
+# Initialize session state
+# -----------------------------
+if 'balance' not in st.session_state:
+    st.session_state.balance = 100_00_000  # 1 Cr
 
-# ----------------------
-# Auto-refresh every 2 seconds
-# ----------------------
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = time.time()
+if 'portfolio' not in st.session_state:
+    st.session_state.portfolio = pd.DataFrame(columns=['Company', 'Type', 'Invested Amount', 'Units', 'Current Value'])
 
-if time.time() - st.session_state.last_refresh > 2:
-    st.session_state.last_refresh = time.time()
-    st.experimental_rerun()
+if 'prices' not in st.session_state:
+    st.session_state.prices = {}
 
-# ----------------------
-# Sidebar Settings
-# ----------------------
-st.sidebar.header("Simulator Settings")
-symbol = st.sidebar.text_input("Stock Symbol", value="TCS.NS")
-days = st.sidebar.slider("Number of Days to Simulate", min_value=5, max_value=30, value=10)
-volatility_futures = st.sidebar.slider("Futures Volatility (%)", min_value=0.1, max_value=5.0, value=1.0)
-volatility_options = st.sidebar.slider("Options Volatility (%)", min_value=0.1, max_value=10.0, value=2.0)
+# -----------------------------
+# Company list
+# -----------------------------
+companies = ["TCS", "INFY", "RELIANCE", "HDFC", "ICICI", "SBIN", "LT", "WIPRO"]
 
-# ----------------------
-# Fetch Historical Data
-# ----------------------
-@st.cache_data
-def get_stock_data(symbol, days):
-    end = datetime.today()
-    start = end - timedelta(days=days*3)  # buffer for weekends
-    data = yf.download(symbol, start=start, end=end, progress=False)
-    if data.empty:
-        return pd.DataFrame()
-    data = data.reset_index()[["Date", "Close"]].tail(days)
-    data.rename(columns={"Close": "Stock Price"}, inplace=True)
-    return data
+st.set_page_config(page_title="F&O Simulator", layout="wide")
+st.title("F&O Simulator")
 
-stock_df = get_stock_data(symbol, days)
+# -----------------------------
+# Company Selection
+# -----------------------------
+selected_companies = st.multiselect("Select Companies to Trade", options=companies)
 
-# ----------------------
-# Simulate F&O Prices
-# ----------------------
-def simulate_fo(stock_df, vol_f, vol_o):
-    fo_df = stock_df.copy()
-    np.random.seed(int(time.time()))
-    fo_df["Futures"] = fo_df["Stock Price"] * (1 + np.random.normal(0, vol_f/100, len(fo_df)))
-    fo_df["Options"] = fo_df["Stock Price"] * (1 + np.random.normal(0, vol_o/100, len(fo_df)))
-    return fo_df
+# -----------------------------
+# Buy Section
+# -----------------------------
+st.subheader("Buy F&O")
 
-fo_df = simulate_fo(stock_df, volatility_futures, volatility_options)
+with st.form("buy_form"):
+    if selected_companies:
+        buy_company = st.selectbox("Select Company", selected_companies)
+        fo_type = st.selectbox("Select F&O Type", ["Futures", "Options"])
+        price = st.number_input("Enter Price per Unit", min_value=0.01, format="%.2f")
+        amount = st.number_input("Enter Investment Amount", min_value=0.01, max_value=st.session_state.balance, format="%.2f")
+        submitted = st.form_submit_button("Buy")
+        
+        if submitted:
+            if amount > st.session_state.balance:
+                st.error("Insufficient balance!")
+            elif price <= 0 or amount <= 0:
+                st.error("Price and amount must be greater than 0")
+            else:
+                units = amount / price
+                # Deduct from balance
+                st.session_state.balance -= amount
+                # Initialize price simulation for this company if not already
+                if buy_company not in st.session_state.prices:
+                    st.session_state.prices[buy_company] = price
+                # Add to portfolio
+                st.session_state.portfolio = pd.concat([
+                    st.session_state.portfolio,
+                    pd.DataFrame([{
+                        'Company': buy_company,
+                        'Type': fo_type,
+                        'Invested Amount': amount,
+                        'Units': units,
+                        'Current Value': amount
+                    }])
+                ], ignore_index=True)
+                st.success(f"Bought {units:.2f} units of {buy_company} {fo_type} for ₹{amount:,.2f}")
 
-# ----------------------
-# Plot Chart
-# ----------------------
-if not fo_df.empty:
-    fig = px.line(
-        fo_df,
-        x="Date",
-        y=["Stock Price", "Futures", "Options"],
-        title=f"{symbol} - Live F&O Simulation",
-        labels={"value": "Price", "variable": "Type"},
-        template="plotly_dark"
-    )
+# -----------------------------
+# Show Balance
+# -----------------------------
+st.subheader("Available Balance")
+st.write(f"₹{st.session_state.balance:,.2f}")
+
+# -----------------------------
+# Price Simulation
+# -----------------------------
+def simulate_prices():
+    new_prices = {}
+    for company, current_price in st.session_state.prices.items():
+        # Simulate price movement: random walk
+        change_percent = np.random.normal(0, 0.5)  # +/-0.5% per update
+        new_price = current_price * (1 + change_percent / 100)
+        new_prices[company] = max(new_price, 0.01)
+    return new_prices
+
+# -----------------------------
+# Update portfolio values
+# -----------------------------
+def update_portfolio(prices):
+    df = st.session_state.portfolio.copy()
+    for idx, row in df.iterrows():
+        company = row['Company']
+        df.at[idx, 'Current Value'] = row['Units'] * prices.get(company, row['Units'])
+    return df
+
+# -----------------------------
+# Dynamic Graph
+# -----------------------------
+st.subheader("Price Chart")
+
+if st.button("Update Prices"):
+    st.session_state.prices = simulate_prices()
+    
+if st.session_state.prices:
+    price_df = pd.DataFrame(list(st.session_state.prices.items()), columns=['Company', 'Price'])
+    fig = px.bar(price_df, x='Company', y='Price', text='Price', title="Current Prices of Companies")
     st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("No data found for this symbol or time range.")
 
-# ----------------------
-# Footer
-# ----------------------
-st.caption("Live F&O Prices are simulated for demonstration. Not financial advice.")
+# -----------------------------
+# Show Portfolio
+# -----------------------------
+st.subheader("Portfolio")
+if not st.session_state.portfolio.empty:
+    st.session_state.portfolio = update_portfolio(st.session_state.prices)
+    st.dataframe(st.session_state.portfolio.style.format({
+        'Invested Amount': "₹{:,.2f}",
+        'Current Value': "₹{:,.2f}",
+        'Units': "{:.2f}"
+    }))
+else:
+    st.info("Your portfolio is empty. Buy some F&O to see it here.")
